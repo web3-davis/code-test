@@ -27,7 +27,7 @@
 go test -v ./test1/
 ```
 
-**预期**：所有测试 `PASS`，最后输出 `ok risk/test1`。
+**预期**：`TestScanBlocks` 通过（`--- PASS`），日志打印 3 条入金记录，最后输出 `ok risk/test1`。
 
 测试通过进程内模拟 RPC（`eth_chainId`、`eth_getBlockByNumber`、`eth_getTransactionReceipt`、`debug_traceTransaction`）构造一个区块，覆盖以下场景：
 
