@@ -26,7 +26,10 @@ func CheckERC20Deposits(tx *types.Transaction, receipt *types.Receipt) ([]Deposi
 		if !ok || len(lg.Topics) != 3 || lg.Topics[0] != transferEventID || len(lg.Data) != 32 {
 			continue
 		}
-		to := common.BytesToAddress(lg.Topics[2].Bytes()[12:])
+		to := common.BytesToAddress(lg.Topics[2].Bytes())
+		if common.BytesToHash(to.Bytes()) != lg.Topics[2] { // 高 12 字节必须为 0，否则不是合法的 address 编码
+			continue
+		}
 		userID, ok := DepositAddresses[to]
 		if !ok {
 			continue

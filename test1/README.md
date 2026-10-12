@@ -25,7 +25,7 @@ test1/
 | `CheckETHDeposit` | 顶层 ETH 转账 | `tx.To()`、`tx.Value()`、Receipt 成功、平台地址 |
 | `CheckERC20Deposits` | USDT、USDC 等 ERC20 转账 | Receipt 成功、Token 合约白名单、`Transfer` 日志、平台地址 |
 | `CheckInternalETHDeposits` | 合约内部 ETH 转账 | Receipt 成功、`callTracer`、调用未回滚、接收地址 |
-| `ScanBlocks` | 区块区间 `[from, to]` | 校验 ChainID 为 1，逐块取交易并依次调用以上三个函数 |
+| `ScanBlocks` | 区块区间 `[from, to]` | 校验 ChainID 为 1、`to` 已达到 `MinConfirmations` 确认数，逐块取交易并依次调用以上三个函数 |
 
 三个函数都接收交易及其 Receipt，由调用方查询一次后共用（会校验 Receipt 与交易哈希一致）；内部 ETH 检测额外需要支持 `debug_traceTransaction` 的 `rpc.Client`。一笔交易可能存在多笔 ERC20 或内部 ETH 入金，故对应函数返回切片。
 
@@ -49,6 +49,7 @@ go mod tidy
 
 - `DepositAddresses`：充值地址 → 用户 ID。
 - `SupportedTokens`：ERC20 合约地址 → 币种名称，示例为以太坊主网 USDT/USDC。
+- `MinConfirmations`：扫描前要求的确认数（默认 12），`to` 之后的新区块不足时 `ScanBlocks` 直接返回错误。
 
 这些 Map 仅用于模拟数据库。扫描过程中不要并发修改 Map；真实系统应使用持久化存储与明确的地址归属约束。
 
@@ -113,8 +114,11 @@ go test -v ./test1/
 | txERC20 | USDT `Transfer` 200 给 user_002 | `ERC20` / `log:7` |
 | txInternal | 合约内部转 5 wei 给 user_001，另一笔转 user_002 的子调用回滚 | 仅 `INTERNAL_ETH` / `trace:0` |
 | txFailed | Receipt 失败的交易 | 不入账 |
+| txFakeToken | 非白名单合约发出的 `Transfer` 日志 | 不入账 |
+| txStranger | ETH 转给非平台地址 | 不入账 |
+| txDirtyTopic | USDT 日志的地址 topic 高 12 字节非 0 | 不入账 |
 
-测试同时断言每笔交易只请求一次 Receipt。
+测试同时断言：确认数不足时拒绝扫描；每笔交易只请求一次 Receipt。
 
 ## 推荐处理流程
 
@@ -134,7 +138,7 @@ go test -v ./test1/
 
 ## 安全边界与已知限制
 
-1. **链与区块验证**：`ScanBlocks` 仅校验 ChainID 为 1；直接调用检测函数时不校验 ChainID。代码均不处理确认数、区块最终性或 Reorg，调用方必须完成这些校验。
+1. **链与区块验证**：`ScanBlocks` 仅校验 ChainID 为 1；直接调用检测函数时不校验 ChainID。`ScanBlocks` 只做固定确认数检查，不处理最终性（finalized）和确认后的 Reorg；直接调用检测函数时不检查确认数，由调用方保证。
 2. **ERC20 白名单**：仅信任指定合约发出的标准 `Transfer` 日志，不按代币名称识别；非标准、手续费型、Rebase 或恶意代币需要额外核对实际余额。
 3. **内部 ETH Trace**：代码遍历成功的 `CALL` / `SELFDESTRUCT` 子调用并跳过失败调用。不同节点/Tracer 对 `SELFDESTRUCT` 的输出可能不同；必须针对目标节点验证，不能保证覆盖所有价值转移路径。
 4. **内部划转**：未过滤平台自有地址之间的转账；真实账务系统必须防止平台内部转移被误当作新增资产。

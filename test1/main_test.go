@@ -21,6 +21,7 @@ type fakeChain struct {
 	blockJSON json.RawMessage
 	receipts  map[common.Hash]*types.Receipt
 	traces    map[common.Hash]callFrame
+	head      uint64 // 最新区块高度
 
 	receiptCalls int // 统计 Receipt 请求次数
 }
@@ -28,6 +29,8 @@ type fakeChain struct {
 type fakeEth struct{ c *fakeChain }
 
 func (e *fakeEth) ChainId() *hexutil.Big { return (*hexutil.Big)(big.NewInt(1)) }
+
+func (e *fakeEth) BlockNumber() hexutil.Uint64 { return hexutil.Uint64(e.c.head) }
 
 func (e *fakeEth) GetBlockByNumber(number string, full bool) json.RawMessage {
 	return e.c.blockJSON
@@ -57,6 +60,8 @@ func TestScanBlocks(t *testing.T) {
 	user2 := common.HexToAddress("0x2222222222222222222222222222222222222222")
 	usdt := common.HexToAddress("0xdAC17F958D2ee523a2206206994597C13D831ec7")
 	someContract := common.HexToAddress("0x9999999999999999999999999999999999999999")
+	fakeUSDT := common.HexToAddress("0x8888888888888888888888888888888888888888")
+	stranger := common.HexToAddress("0x7777777777777777777777777777777777777777")
 
 	key, _ := crypto.GenerateKey()
 	sender := crypto.PubkeyToAddress(key.PublicKey)
@@ -75,6 +80,9 @@ func TestScanBlocks(t *testing.T) {
 	txERC20 := newTx(1, usdt, 0)            // USDT Transfer 到 user2
 	txInternal := newTx(2, someContract, 0) // 合约内部转 ETH 给 user1
 	txFailed := newTx(3, user2, 500)        // 失败交易，不应入账
+	txFakeToken := newTx(4, fakeUSDT, 0)    // 非白名单合约伪造的 Transfer，不应入账
+	txStranger := newTx(5, stranger, 300)   // 转给非平台地址，不应入账
+	txDirtyTopic := newTx(6, usdt, 0)       // 地址 topic 高位非 0，不应入账
 
 	chain := &fakeChain{receipts: map[common.Hash]*types.Receipt{}, traces: map[common.Hash]callFrame{}}
 	receipt := func(tx *types.Transaction, status uint64, logs []*types.Log) {
@@ -106,7 +114,24 @@ func TestScanBlocks(t *testing.T) {
 
 	receipt(txFailed, types.ReceiptStatusFailed, nil)
 
-	txs := []*types.Transaction{txETH, txERC20, txInternal, txFailed}
+	transferLog := func(token common.Address, to common.Hash) []*types.Log {
+		return []*types.Log{{
+			Address: token,
+			Topics:  []common.Hash{transferEventID, common.BytesToHash(sender.Bytes()), to},
+			Data:    common.LeftPadBytes(big.NewInt(999).Bytes(), 32),
+		}}
+	}
+	receipt(txFakeToken, types.ReceiptStatusSuccessful, transferLog(fakeUSDT, common.BytesToHash(user2.Bytes())))
+	rootTrace(txFakeToken)
+	receipt(txStranger, types.ReceiptStatusSuccessful, nil)
+	rootTrace(txStranger)
+	dirty := common.BytesToHash(user2.Bytes())
+	dirty[0] = 0xff
+	receipt(txDirtyTopic, types.ReceiptStatusSuccessful, transferLog(usdt, dirty))
+	rootTrace(txDirtyTopic)
+
+	txs := []*types.Transaction{txETH, txERC20, txInternal, txFailed, txFakeToken, txStranger, txDirtyTopic}
+	chain.head = 100 + MinConfirmations
 	block := types.NewBlock(&types.Header{Number: big.NewInt(100), Difficulty: big.NewInt(0), GasLimit: 30_000_000},
 		&types.Body{Transactions: txs}, nil, trie.NewStackTrie(nil))
 	var blockMap map[string]interface{}
@@ -126,6 +151,14 @@ func TestScanBlocks(t *testing.T) {
 	rpcClient := rpc.DialInProc(server)
 	defer rpcClient.Close()
 	client := ethclient.NewClient(rpcClient)
+
+	// 确认数不足时拒绝扫描
+	chain.head = 100 + MinConfirmations - 1
+	if _, err := ScanBlocks(context.Background(), client, rpcClient, 100, 100); err == nil {
+		t.Fatal("want error for unconfirmed block")
+	}
+	chain.head = 100 + MinConfirmations
+	chain.receiptCalls = 0
 
 	deposits, err := ScanBlocks(context.Background(), client, rpcClient, 100, 100)
 	if err != nil {

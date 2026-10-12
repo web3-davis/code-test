@@ -16,6 +16,10 @@ cd test3
 go test -v ./...
 ```
 
+`internal/bitcoin/transfer_test.go`：
+
+- `TestBitcoinTransfer`：正常转账通过签名验签和脚本引擎校验；主网地址、非法地址、dust、余额不足、未知 keyID、签名与公钥不匹配都返回错误。
+
 `internal/listener/event_listener_test.go` 用 `MockBackend` 断言状态和 BTC 转账次数：
 
 - `TestListenerScenarios`：正常请求 Completed；重复事件只转一次 BTC；主网地址 Failed；Reorg 移除的日志、非目标合约的日志都保持 Pending。
@@ -62,3 +66,11 @@ BitcoinTransfer：校验地址/网络/Dust → 选 UTXO → 构建 P2WPKH 交易
 - 签名前校验收款地址、金额、手续费上限、找零地址；签名后用公钥验签并执行脚本校验。
 - 事件不代表资金授权：真实系统还需校验用户余额、额度与资金归属，MPC 侧需独立的审批策略。
 - Completed 依赖 Operator 的可信通知，合约无法独立验证 BTC 链状态。
+
+## 设计取舍：资金授权
+
+Demo 中 `requestBTCTransfer` 只记录请求，不锁定任何资产，Go 后台也不检查余额，因此**任何人都可以申请任意数量的 BTC**。这是为了聚焦题目要求的流程而做的简化，真实系统必须在发起 BTC 转账前确认资金来源，常见做法：
+
+1. **合约内锁定/销毁资产**：用户调用时转入等值的 WBTC 等代币（`transferFrom` 到合约或直接 burn），合约记录锁定金额，`failBTCTransfer` 时退还。这样事件本身就代表“资金已到位”。
+2. **链下账户扣减**：后台在 `startBTCTransfer` 前，在数据库事务中检查并冻结用户的 BTC 余额，失败时解冻。
+3. **额度与审批**：单笔/日累计限额，大额进入人工审批；MPC 签名机独立执行同样的策略，不盲签业务方提交的摘要。

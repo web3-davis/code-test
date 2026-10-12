@@ -27,7 +27,7 @@
 go test -v ./test1/
 ```
 
-**预期**：`TestScanBlocks` 通过（`--- PASS`），日志打印 3 条入金记录，最后输出 `ok risk/test1`。测试同时断言每笔交易只请求一次 Receipt。
+**预期**：`TestScanBlocks` 通过（`--- PASS`），日志打印 3 条入金记录，最后输出 `ok risk/test1`。测试同时断言：确认数不足时拒绝扫描；每笔交易只请求一次 Receipt。
 
 测试通过进程内模拟 RPC（`eth_chainId`、`eth_getBlockByNumber`、`eth_getTransactionReceipt`、`debug_traceTransaction`）构造一个区块，覆盖以下场景：
 
@@ -37,6 +37,9 @@ go test -v ./test1/
 | 白名单 USDT 合约的 `Transfer` 日志 | 识别为 `ERC20` 入金 |
 | 合约内部转 ETH，其中一个子调用回滚 | 仅成功的子调用识别为 `INTERNAL_ETH` |
 | Receipt 失败的交易 | 不入账（防假入金） |
+| 非白名单合约伪造的 `Transfer` 日志 | 不入账（防假币） |
+| ETH 转给非平台地址 | 不入账 |
+| 地址 topic 高 12 字节非 0 | 不入账（防地址编码伪造） |
 
 重点代码：`test1/eth_deposit.go`、`test1/erc20_deposit.go`、`test1/internal_eth_deposit.go`。
 
@@ -66,10 +69,11 @@ go test -v ./...   # 单元测试
 go run .           # 运行 Demo
 ```
 
-**测试预期**：`internal/listener` 下 3 个测试均 `PASS`：
+**测试预期**：`internal/bitcoin` 和 `internal/listener` 下 4 个测试均 `PASS`：
 
 | 测试 | 验证内容 |
 | --- | --- |
+| `TestBitcoinTransfer` | 正常转账通过验签和脚本校验；主网地址、非法地址、dust、余额不足、未知密钥、签名与公钥不匹配均被拒绝 |
 | `TestListenerScenarios` | 各场景最终状态正确，重复事件只转一次 BTC |
 | `TestRetryAfterStartFailure` | `startBTCTransfer` 失败后重新投递事件，可继续完成转账 |
 | `TestContextCancel` | 等待确认时 ctx 取消立即返回 |

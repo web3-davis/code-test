@@ -24,6 +24,9 @@ var SupportedTokens = map[common.Address]string{
 	common.HexToAddress("0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48"): "USDC",
 }
 
+// MinConfirmations 区块之后至少还需有多少个新区块才扫描，降低 Reorg 造成假入金的风险。
+var MinConfirmations uint64 = 12
+
 var transferEventID = crypto.Keccak256Hash([]byte("Transfer(address,address,uint256)"))
 
 type Deposit struct {
@@ -44,6 +47,13 @@ func ScanBlocks(ctx context.Context, client *ethclient.Client, rpcClient *rpc.Cl
 	}
 	if chainID.Cmp(big.NewInt(1)) != 0 {
 		return nil, fmt.Errorf("unexpected chain id %s, want 1", chainID)
+	}
+	head, err := client.BlockNumber(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if to+MinConfirmations > head {
+		return nil, fmt.Errorf("block %d not confirmed: head %d, need %d confirmations", to, head, MinConfirmations)
 	}
 	var deposits []Deposit
 	for n := from; n <= to; n++ {
