@@ -21,6 +21,8 @@ type fakeChain struct {
 	blockJSON json.RawMessage
 	receipts  map[common.Hash]*types.Receipt
 	traces    map[common.Hash]callFrame
+
+	receiptCalls int // 统计 Receipt 请求次数
 }
 
 type fakeEth struct{ c *fakeChain }
@@ -32,6 +34,7 @@ func (e *fakeEth) GetBlockByNumber(number string, full bool) json.RawMessage {
 }
 
 func (e *fakeEth) GetTransactionReceipt(hash common.Hash) (*types.Receipt, error) {
+	e.c.receiptCalls++
 	r, ok := e.c.receipts[hash]
 	if !ok {
 		return nil, fmt.Errorf("receipt not found: %s", hash)
@@ -130,6 +133,9 @@ func TestScanBlocks(t *testing.T) {
 	}
 	for _, d := range deposits {
 		t.Logf("%+v", d)
+	}
+	if chain.receiptCalls != len(txs) {
+		t.Errorf("receipt requested %d times, want %d (once per tx)", chain.receiptCalls, len(txs))
 	}
 
 	want := []Deposit{

@@ -14,6 +14,15 @@ go run ./test2
 
 输出分为 4 段，分别对应 4 个函数的结果。
 
+## 测试
+
+```bash
+go test -v ./test2/
+```
+
+- `TestRoundTrip`：构建 → 签名 → 序列化 → 解析（Base64 与 Hex 各一次），校验 ATA 地址、CreateIdempotent 指令、验签/篡改结果，以及解析出的账户、金额、精度与构建时一致。
+- `TestDecodeInvalid`：非法编码、截断数据、指令程序索引越界时返回 error，而不是 panic。
+
 ## 文件结构
 
 | 文件 | 函数 | 作用 |

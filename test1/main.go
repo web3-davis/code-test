@@ -6,6 +6,7 @@ import (
 	"math/big"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
@@ -51,19 +52,24 @@ func ScanBlocks(ctx context.Context, client *ethclient.Client, rpcClient *rpc.Cl
 			return nil, fmt.Errorf("get block %d: %w", n, err)
 		}
 		for _, tx := range block.Transactions() {
-			d, err := CheckETHDeposit(ctx, client, tx)
+			// 每笔交易只查一次 Receipt，三个检测函数共用
+			receipt, err := client.TransactionReceipt(ctx, tx.Hash())
+			if err != nil {
+				return nil, fmt.Errorf("get receipt %s: %w", tx.Hash(), err)
+			}
+			d, err := CheckETHDeposit(tx, receipt)
 			if err != nil {
 				return nil, fmt.Errorf("check eth tx %s: %w", tx.Hash(), err)
 			}
 			if d != nil {
 				deposits = append(deposits, *d)
 			}
-			ds, err := CheckERC20Deposits(ctx, client, tx)
+			ds, err := CheckERC20Deposits(tx, receipt)
 			if err != nil {
 				return nil, fmt.Errorf("check erc20 tx %s: %w", tx.Hash(), err)
 			}
 			deposits = append(deposits, ds...)
-			ds, err = CheckInternalETHDeposits(ctx, client, rpcClient, tx)
+			ds, err = CheckInternalETHDeposits(ctx, rpcClient, tx, receipt)
 			if err != nil {
 				return nil, fmt.Errorf("check internal eth tx %s: %w", tx.Hash(), err)
 			}
@@ -71,4 +77,15 @@ func ScanBlocks(ctx context.Context, client *ethclient.Client, rpcClient *rpc.Cl
 		}
 	}
 	return deposits, nil
+}
+
+// checkReceipt 确保传入的 Receipt 属于该交易，防止调用方传错导致误判。
+func checkReceipt(tx *types.Transaction, receipt *types.Receipt) error {
+	if tx == nil || receipt == nil {
+		return fmt.Errorf("nil tx or receipt")
+	}
+	if receipt.TxHash != tx.Hash() {
+		return fmt.Errorf("receipt %s does not match tx %s", receipt.TxHash, tx.Hash())
+	}
+	return nil
 }

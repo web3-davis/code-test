@@ -1,23 +1,17 @@
 package test1
 
 import (
-	"context"
 	"fmt"
 	"math/big"
 	"strconv"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 // CheckERC20Deposits parses successful ERC20 Transfer logs from allowlisted contracts.
-func CheckERC20Deposits(ctx context.Context, client *ethclient.Client, tx *types.Transaction) ([]Deposit, error) {
-	if tx == nil {
-		return nil, nil
-	}
-	receipt, err := client.TransactionReceipt(ctx, tx.Hash())
-	if err != nil {
+func CheckERC20Deposits(tx *types.Transaction, receipt *types.Receipt) ([]Deposit, error) {
+	if err := checkReceipt(tx, receipt); err != nil {
 		return nil, err
 	}
 	if receipt.Status != types.ReceiptStatusSuccessful {

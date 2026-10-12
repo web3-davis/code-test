@@ -9,7 +9,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/rpc"
 )
 
@@ -24,12 +23,8 @@ type callFrame struct {
 
 // CheckInternalETHDeposits traces nested ETH transfers only, excluding the root call.
 // Requires a trusted Geth-compatible debug_traceTransaction endpoint.
-func CheckInternalETHDeposits(ctx context.Context, client *ethclient.Client, rpcClient *rpc.Client, tx *types.Transaction) ([]Deposit, error) {
-	if tx == nil {
-		return nil, nil
-	}
-	receipt, err := client.TransactionReceipt(ctx, tx.Hash())
-	if err != nil {
+func CheckInternalETHDeposits(ctx context.Context, rpcClient *rpc.Client, tx *types.Transaction, receipt *types.Receipt) ([]Deposit, error) {
+	if err := checkReceipt(tx, receipt); err != nil {
 		return nil, err
 	}
 	if receipt.Status != types.ReceiptStatusSuccessful {

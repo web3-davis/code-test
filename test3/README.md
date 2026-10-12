@@ -9,6 +9,19 @@ go run .
 
 不需要真实区块链、节点、数据库或 MPC 集群。
 
+## 测试
+
+```bash
+cd test3
+go test -v ./...
+```
+
+`internal/listener/event_listener_test.go` 用 `MockBackend` 断言状态和 BTC 转账次数：
+
+- `TestListenerScenarios`：正常请求 Completed；重复事件只转一次 BTC；主网地址 Failed；Reorg 移除的日志、非目标合约的日志都保持 Pending。
+- `TestRetryAfterStartFailure`：`startBTCTransfer` 失败（BTC 未发出）后重新投递事件，可以继续完成转账。
+- `TestContextCancel`：等待 EVM 确认时 ctx 取消会立即返回。
+
 ## 流程
 
 ```

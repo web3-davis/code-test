@@ -27,7 +27,7 @@ test1/
 | `CheckInternalETHDeposits` | 合约内部 ETH 转账 | Receipt 成功、`callTracer`、调用未回滚、接收地址 |
 | `ScanBlocks` | 区块区间 `[from, to]` | 校验 ChainID 为 1，逐块取交易并依次调用以上三个函数 |
 
-前两项使用 `ethclient.Client`，内部 ETH 检测额外需要支持 `debug_traceTransaction` 的 `rpc.Client`。一笔交易可能存在多笔 ERC20 或内部 ETH 入金，故对应函数返回切片。
+三个函数都接收交易及其 Receipt，由调用方查询一次后共用（会校验 Receipt 与交易哈希一致）；内部 ETH 检测额外需要支持 `debug_traceTransaction` 的 `rpc.Client`。一笔交易可能存在多笔 ERC20 或内部 ETH 入金，故对应函数返回切片。
 
 ## 环境准备
 
@@ -73,14 +73,15 @@ for _, d := range deposits {
 也可以对单笔交易直接调用三个检测函数：
 
 ```go
-ethDeposit, err := test1.CheckETHDeposit(ctx, client, tx)
-erc20Deposits, err := test1.CheckERC20Deposits(ctx, client, tx)
-internalDeposits, err := test1.CheckInternalETHDeposits(ctx, client, rawRPC, tx)
+receipt, err := client.TransactionReceipt(ctx, tx.Hash())
+ethDeposit, err := test1.CheckETHDeposit(tx, receipt)
+erc20Deposits, err := test1.CheckERC20Deposits(tx, receipt)
+internalDeposits, err := test1.CheckInternalETHDeposits(ctx, rawRPC, tx, receipt)
 ```
 
 `ScanBlocks` 遇到任一错误立即返回（错误中带区块号或交易哈希）。若节点不支持 Trace，应明确处理该错误，不得将未检测视为无内部入金。
 
-`ScanBlocks` 是简易实现：每笔交易会被三个函数各请求一次 Receipt，并对每笔交易调用 `debug_traceTransaction`，扫描较慢；同一交易可能同时产生顶层 ETH 与内部 ETH 两类入金记录。
+`ScanBlocks` 是简易实现：每笔交易请求一次 Receipt，并对每笔成功交易调用 `debug_traceTransaction`，未做并发；同一交易可能同时产生顶层 ETH 与内部 ETH 两类入金记录。
 
 ## 返回数据
 
@@ -112,6 +113,8 @@ go test -v ./test1/
 | txERC20 | USDT `Transfer` 200 给 user_002 | `ERC20` / `log:7` |
 | txInternal | 合约内部转 5 wei 给 user_001，另一笔转 user_002 的子调用回滚 | 仅 `INTERNAL_ETH` / `trace:0` |
 | txFailed | Receipt 失败的交易 | 不入账 |
+
+测试同时断言每笔交易只请求一次 Receipt。
 
 ## 推荐处理流程
 

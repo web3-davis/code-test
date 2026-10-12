@@ -8,8 +8,8 @@
 | 目录 | 题目 | 验证方式 |
 | --- | --- | --- |
 | [test1](test1/README.md) | 以太坊入金检测（ETH / ERC20 / 合约内部 ETH，防假入金） | 单元测试 |
-| [test2](test2/README.md) | Solana SPL Token 交易（ATA、Message、签名、Raw Tx 解析） | 运行 Demo |
-| [test3](test3/README.md) | Solidity + Go + BTC + MPC 跨链转账 | 运行 Demo |
+| [test2](test2/README.md) | Solana SPL Token 交易（ATA、Message、签名、Raw Tx 解析） | 单元测试 + 运行 Demo |
+| [test3](test3/README.md) | Solidity + Go + BTC + MPC 跨链转账 | 单元测试 + 运行 Demo |
 
 ## 环境要求
 
@@ -27,7 +27,7 @@
 go test -v ./test1/
 ```
 
-**预期**：`TestScanBlocks` 通过（`--- PASS`），日志打印 3 条入金记录，最后输出 `ok risk/test1`。
+**预期**：`TestScanBlocks` 通过（`--- PASS`），日志打印 3 条入金记录，最后输出 `ok risk/test1`。测试同时断言每笔交易只请求一次 Receipt。
 
 测试通过进程内模拟 RPC（`eth_chainId`、`eth_getBlockByNumber`、`eth_getTransactionReceipt`、`debug_traceTransaction`）构造一个区块，覆盖以下场景：
 
@@ -45,10 +45,13 @@ go test -v ./test1/
 在仓库根目录执行：
 
 ```bash
-go run ./test2
+go test -v ./test2/   # 单元测试
+go run ./test2        # 运行 Demo
 ```
 
-**预期**：输出 4 段结果，依次对应：
+**测试预期**：`TestRoundTrip`（构建 → 签名 → 序列化 → 解析，结果与构建时一致）和 `TestDecodeInvalid`（非法输入返回 error 而不是 panic）均 `PASS`。
+
+**Demo 预期**：输出 4 段结果，依次对应：
 
 1. `PrepareAccount`：计算 ATA 地址并构建 CreateIdempotent 指令
 2. `BuildMessage`：构建 TransferChecked 交易并序列化 Message
@@ -59,10 +62,19 @@ go run ./test2
 
 ```bash
 cd test3
-go run .
+go test -v ./...   # 单元测试
+go run .           # 运行 Demo
 ```
 
-**预期**：日志展示完整流程（合约事件 → Go 监听 → 构建 BTC 交易 → Mock MPC 签名 → 验签与脚本校验 → 广播 → 回调合约），最后输出：
+**测试预期**：`internal/listener` 下 3 个测试均 `PASS`：
+
+| 测试 | 验证内容 |
+| --- | --- |
+| `TestListenerScenarios` | 各场景最终状态正确，重复事件只转一次 BTC |
+| `TestRetryAfterStartFailure` | `startBTCTransfer` 失败后重新投递事件，可继续完成转账 |
+| `TestContextCancel` | 等待确认时 ctx 取消立即返回 |
+
+**Demo 预期**：日志展示完整流程（合约事件 → Go 监听 → 构建 BTC 交易 → Mock MPC 签名 → 验签与脚本校验 → 广播 → 回调合约），最后输出：
 
 ```text
 == 最终合约状态
