@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"time"
 
 	geth "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
@@ -15,6 +16,9 @@ import (
 	"btctransfer/internal/ethereum"
 	"btctransfer/internal/mpc"
 )
+
+// pollInterval 轮询区块高度的间隔（Demo 用较小值，真实环境约等于出块间隔）
+var pollInterval = 10 * time.Millisecond
 
 type Listener struct {
 	Backend       ethereum.Backend
@@ -114,11 +118,11 @@ func (l *Listener) handleLog(ctx context.Context, lg types.Log) {
 		fmt.Printf("  [Listener] request %s not confirmed: %v\n", key, err)
 		return
 	}
-	l.processed[key] = true
 
 	// 6. 业务校验失败（确定未发送 BTC）-> 直接标记 Failed
 	//    注：Demo 假设请求已通过业务授权；真实系统还需校验用户 BTC 余额、额度、资金归属。
 	if _, err := bitcoin.ValidateAddress(btcAddress); err != nil {
+		l.processed[key] = true
 		l.fail(ctx, requestID, err.Error())
 		return
 	}
@@ -128,6 +132,8 @@ func (l *Listener) handleLog(ctx context.Context, lg types.Log) {
 		fmt.Printf("  [Listener] startBTCTransfer failed, BTC not sent: %v\n", err)
 		return
 	}
+	// Pending -> Processing 成功后才标记已处理；重复发起由合约 require(status == Pending) 兜底
+	l.processed[key] = true
 
 	// 8. 构建、签名、广播 BTC 交易
 	txid, err := bitcoin.BitcoinTransfer(ctx, btcAddress, int64(amount), l.Signer)
@@ -164,7 +170,11 @@ func (l *Listener) waitConfirmed(ctx context.Context, lg types.Log) error {
 			fmt.Printf("  [Listener] log block %d, head %d, confirmations >= %d\n", lg.BlockNumber, head, l.Confirmations)
 			break
 		}
-		// 真实环境：time.Sleep(区块间隔) 或监听新区块头
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(pollInterval):
+		}
 	}
 	// 确认数够了再查一次 receipt，确保日志所在区块仍是主链区块
 	r, err := l.Backend.TransactionReceipt(ctx, lg.TxHash)

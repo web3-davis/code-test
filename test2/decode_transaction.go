@@ -49,6 +49,10 @@ func DecodeTransaction(rawTx string) (*DecodedTransaction, error) {
 		return nil, err
 	}
 
+	if len(tx.Message.AccountKeys) == 0 {
+		return nil, fmt.Errorf("交易没有账户")
+	}
+
 	// 3~6. 签名、Fee Payer（AccountKeys[0]）、Blockhash、AccountKeys
 	result := &DecodedTransaction{
 		Signatures:      tx.Signatures,
@@ -58,7 +62,10 @@ func DecodeTransaction(rawTx string) (*DecodedTransaction, error) {
 	}
 
 	// 7. 解析指令：指令里存的是账户索引，需要映射回 AccountKeys
-	for _, ci := range tx.Message.Instructions {
+	for i, ci := range tx.Message.Instructions {
+		if int(ci.ProgramIDIndex) >= len(tx.Message.AccountKeys) {
+			return nil, fmt.Errorf("指令 %d 的 programIdIndex %d 越界", i, ci.ProgramIDIndex)
+		}
 		programID := tx.Message.AccountKeys[ci.ProgramIDIndex]
 		item := DecodedInstruction{ProgramID: programID, Type: "Unknown"}
 
